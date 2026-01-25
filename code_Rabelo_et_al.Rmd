@@ -1,0 +1,2589 @@
+---
+title: "THE INFLUENCE OF VITORIA EDDY IN THE ABUNDANCE OF SEABOB SHRIMP Xiphopenaeus spp. (HELLER) IN THE BRAZILIAN EAST COAST"
+author: "Leandro Bonesi Rabelo, Júlio Neves de Araújo, Agnaldo Silva Martins"
+date: "2026-01-19"
+output: html_document
+---
+
+```{r packages, include = F}
+# Packages needed
+library (openxlsx)
+library (dplyr)
+library (mgcv)
+library (tweedie)
+library (grid)
+library (ggplot2)
+library (gridExtra)
+library (cowplot)
+library (broom)
+library (tidyverse)
+library (corrplot)
+library (knitr)
+library (purrr)
+library (dunn.test)
+library (reshape2)
+library (kableExtra)
+library (gratia)
+library (patchwork)
+library (zoo)
+library (paletteer)
+library (metR)
+```
+
+```{r setup, include = F}
+###################################
+#### Preparing the environment ####
+###################################
+
+# Clean the environment
+rm (list = ls ())
+
+# Set aspects of the Locale
+Sys.setlocale ("LC_ALL", "en_US.UTF-8")
+
+# Set directory
+## OBS: Set the directory where data and code are placed
+dir <- "C:/Users/name/Documents"
+setwd (dir)
+
+# Set colour selection
+colour_line <- "#053138FF"
+colour_point <- "#0B8CA9FF"
+colour_ribbon <- "#22A1B6FF"
+colour_grid <- "#AEC7BEFF"
+colour_bckgrd <- "#bfc7c4"
+
+## Plot theme for Figure 2
+# Time series plot
+theme_ts <- 
+  theme_minimal(base_size = 18) +
+  theme (axis.title.y = element_text (vjust = 1),
+         axis.text.y = element_text (),
+         axis.text.x = element_blank (),
+         axis.title.x = element_blank (),
+         plot.background  = element_rect(fill = "white", 
+                                         color = NA),
+         panel.background = element_rect(fill = "white", 
+                                         color = NA))
+
+# Boxplot
+theme_bp <- 
+  theme_minimal(base_size = 18) +
+  theme (axis.title.y = element_blank (),
+         axis.text.y = element_blank (),
+         axis.text.x = element_blank (),
+         axis.title.x = element_blank (),
+         plot.background  = element_rect(fill = "white", 
+                                         color = NA),
+         panel.background = element_rect(fill = "white", 
+                                         color = NA))
+
+## Plot theme for Figure 3
+# Seasonal variation plot
+theme_m <-
+  theme_minimal (base_size = 18) +
+  theme (plot.margin = margin(0, 2, 0, 0),
+         panel.grid.major = element_line(
+           color = colour_grid,
+           linewidth = 0.3),
+         panel.grid.minor = element_blank(), 
+         legend.position = "none", 
+         plot.title = element_blank (),
+         plot.caption = element_blank(),
+         axis.title.x = element_blank (),
+         axis.title.y = element_blank (),
+         axis.text.y = element_blank ()
+         )
+
+# Trend plot
+theme_y <- 
+  theme_minimal(base_size = 18) +
+  theme (plot.margin = margin(0, 2, 0, 0),
+         panel.grid.major = element_line(
+           color = colour_grid,
+           linewidth = 0.3),
+         panel.grid.minor = element_blank(), 
+         legend.position = "none", 
+         plot.title = element_blank (),
+         plot.caption = element_blank(),
+         axis.title.x = element_blank ()
+         )
+
+## Plot theme for Figures 4 and 5
+theme_model <-
+  theme_minimal (base_size = 18) +
+  theme (plot.margin = margin(0, 2, 0, 0),
+         panel.grid.major = element_line(
+           color = colour_grid,
+           linewidth = 0.3),
+         panel.grid.minor = element_blank(), 
+         legend.position = "none", 
+         plot.title = element_blank (),
+         plot.caption = element_blank(),
+         axis.title.y = element_blank (),
+         axis.text.y = element_blank ()
+         )
+
+###################################
+#### Data manipulation of CPUE ####
+###################################
+
+## Data import
+data_CPUE <- read.xlsx (
+  xlsxFile = "data.xlsx",
+  sheet = 2,
+  skipEmptyRows = T)
+
+## Average Capture per unit effort - CPUE (kg/h): 
+# Period: Sep/01 to Jun/05, Jan/08 to Dec/15, May/16 to Mar/20
+data_CPUE_mean <- data_CPUE %>% 
+  mutate (
+    grid = as.factor (sampling_grid),
+    transect = as.factor (transect),
+    area = as.factor (area),
+    )  %>% 
+  mutate (
+    # CPUE = total shrimp weight / effort (kg/h)
+    CPUE = tw_g / 1000 / effort_min * 60
+    ) %>% 
+  group_by (
+    grid, month, year
+    ) %>% 
+  summarise(
+    valid_n = sum (!is.na (CPUE)),
+    sd_CPUE = sd (CPUE, na.rm = T),
+    CPUE = mean (CPUE, na.rm = T),
+    .groups = "drop"
+    ) %>%
+  mutate(
+    # standard error of mean CPUE
+    se_CPUE = sd_CPUE / sqrt (valid_n)
+    ) %>% 
+  select (-c (valid_n, sd_CPUE))
+
+########################################
+#### Data manipulation of cofactors ####
+########################################
+
+# Data import
+data_env <- read.xlsx (xlsxFile = "data.xlsx",
+                   sheet = 1,
+                   skipEmptyRows = T)
+
+# Variables: 
+# Primary productivity of biomass expressed as carbon - PP (mg/m²day)
+# Sea water potential temperature at sea floor - Temp (°C)
+# Flow of Peruípe river - Flow (m³/s)
+data_env <- data_env %>% 
+  mutate (
+    # Tranform date
+    month_year = as.Date (date, origin = "1899-12-30", format = "%Y-%m-%d"),
+    # Month abb to plot axis
+    month_abb = month.abb [month],
+    # Reorder the month factor to ensure chronological order for plotting
+    month_abb = forcats::fct_reorder (month_abb, month),
+    ) %>%
+  select (1:4, month_abb, month_year, POC, PP, temp, flow)
+
+# merge CPUE and cofactors
+data <- merge (data_CPUE_mean, data_env, by = c ("year", "month"), all.y = T)
+
+# after merging dataframes, replace NA by interpolation
+data$CPUE <- na.spline (data$CPUE, maxgap = 3)
+
+# filter data with no CPUE measurement
+data <- data %>% filter(month_year > "2001-08-01")
+
+##############################################
+#### Split data frame into train and test ####
+##############################################
+
+# Setting the seed
+set.seed(42)
+
+# Split
+s <- sample (1:nrow (data), round (nrow (data) * 0.8))
+serie_train <- data [s, ]
+serie_test <- data [-s, ]
+```
+
+## Exploratory descriptive analysis of variables
+
+### CPUE
+
+#### Descriptive statistics
+
+```{r, echo = F, warning = F, fig.align ='center', fig.height = 4, fig.width = 16}
+# Line Plot
+ts_CPUE <- data %>%
+  ggplot (aes (x = month_year, y = CPUE)) +
+  labs (y = "CPUE (kg/h)") +
+  scale_x_date (date_breaks = "12 months", 
+                date_labels = "%Y", 
+                limits = c (as.Date ("2001-09-01"), NA)) +
+  geom_point (size = 1.5, 
+              color = colour_line) +
+  geom_errorbar(aes (ymin = CPUE - se_CPUE, 
+                     ymax = CPUE + se_CPUE), 
+                width = 0.15, 
+                color = colour_line, 
+                linewidth = 0.6) +
+  theme_ts
+  
+# Boxplot
+bp_CPUE <- ggplot (data, aes (x = month_abb, y = CPUE))  +
+  geom_boxplot (color = colour_line, 
+                fill = colour_ribbon, 
+                alpha = 0.5) +
+  scale_y_continuous (limits = c (0, 20), 
+                      breaks = seq (0, 20, by = 5)) +
+  theme_bp
+
+# plot to compose Figure 2
+plot1_CPUE <- ts_CPUE +
+  theme (axis.text.x = element_text (size = 18, 
+                                     angle = 90, 
+                                     vjust = 0.5))
+plot2_CPUE <- bp_CPUE +
+  theme (axis.text.x = element_text (size = 18, 
+                                     angle = 90, 
+                                     vjust = 0.5))
+
+# Combine lineplot and boxplot
+plot_CPUE <- plot_grid (
+  plot1_CPUE, plot2_CPUE, 
+  labels = c ("a", "b"), 
+  label_size = 20, 
+  ncol = 2, 
+  nrow = 1, 
+  rel_widths = c (2, 1), 
+  height = 3, 
+  width = 15, 
+  label_x = c (0.06, 0.03), 
+  label_y = c (0.98, 0.98),
+  align = "hv",
+  axis = "bt"
+  )
+print (plot_CPUE)
+```
+\ 
+
+Measures of central tendency and dispersion
+```{r, echo = F}
+# Measures of central tendency and dispersion
+summary (data$CPUE)
+# N
+paste0 ("N = ", sum(!is.na(data$CPUE)))
+```
+
+```{r, echo = F}
+# Annual mean and se
+annual_mean <- data %>%
+  group_by (year) %>%
+  summarise (annual_mean = round (mean (CPUE, na.rm = TRUE), digits = 1),
+             se = round (sqrt (var (CPUE, na.rm = TRUE) / n()), digits = 1))
+opts <- options(knitr.kable.NA = "")
+kable (annual_mean, align = "c")
+```
+
+```{r, echo = F}
+# Monthly mean and se
+monthly_mean <- data %>%
+  group_by (month) %>%
+  summarise (monthly_mean = round (mean (CPUE, na.rm = TRUE), digits = 1),
+            se = round (sqrt (var (CPUE, na.rm = TRUE) / n ()), digits = 1))
+opts <- options(knitr.kable.NA = "")
+kable (monthly_mean, align = "c")
+```
+
+#### Shapiro-Wilk Normality Test
+
+```{r, echo = F, warning = F, fig.align ='center', fig.height = 4, fig.width = 12}
+## Shapiro-Wilk Normality Test
+shapiro_result <- shapiro.test (data$CPUE)
+
+# Create a ggplot histogram
+histogram <- ggplot(data, aes(x = CPUE)) +
+  geom_histogram(binwidth = 1, color = "black", fill = "white") +
+  ggtitle(paste("Shapiro-Wilk test: p =", round(shapiro_result$p.value, 3))) +
+  xlab("CPUE (kg/h)") +
+  ylab("Density")
+
+# Add a normal distribution curve scaled by 200
+histogram <- histogram + 
+  stat_function(
+    fun = function (x) 200 * dnorm (x, mean = mean (data$CPUE, na.rm = TRUE), 
+                                    sd = sd(data$CPUE, na.rm = TRUE)), color = "red")
+
+# Create a ggplot Q-Q plot
+qqplot <- ggplot (data, aes (sample = CPUE)) +
+          stat_qq () +
+          stat_qq_line () +
+          ggtitle (paste ("Q-Q plot"))
+   
+# Arrange histogram and Q-Q plot
+grid.arrange (histogram, qqplot, nrow = 1)
+```
+
+#### Seasonal variation (Kruskal-Wallis and Dunn's Test)
+
+```{r echo = F}
+# Kruskal-Wallis Test
+kruskal.test (data$CPUE, data$month)
+```
+
+```{r, include = F}
+# Dunn's Test
+dunn_result <- dunn.test (data$CPUE, data$month)
+
+# transform comparisons to data frame
+comparison_df <- data.frame (comparison = dunn_result$comparisons)
+
+# Separate the numbers 'i' and 'j' in the comparisons.
+comparison_df <- separate (comparison_df, comparison, c ("i", "j"), sep = " - ")
+
+# Add 0 before the values, except for '10', '11', and '12'
+comparison_df$i <- ifelse (comparison_df$i %in% c ("10", "11", "12"), comparison_df$i, paste0 ("0", comparison_df$i))
+comparison_df$j <- ifelse (comparison_df$j %in% c ("10", "11", "12"), comparison_df$j, paste0 ("0", comparison_df$j))
+
+# Add adjusted p-values to data frame
+comparison_df$p_value_adj <- round (dunn_result$P.adjusted, digits = 4)
+
+# Duplicate data frames
+comparison_df2 <- comparison_df %>% 
+  select (i = j, j = i, p_value_adj)
+
+# Bind data frames
+comparison_df <- rbind (comparison_df, comparison_df2)
+
+# Create matrix
+matrix_result <- acast (comparison_df, i ~ j, value.var = "p_value_adj")
+
+# Create values for same month
+matrix_result <- ifelse (is.na (matrix_result), 1, matrix_result)
+
+# Colors to significant p-values
+matrix_coloured <- as.data.frame(matrix_result)
+matrix_coloured <- matrix_coloured %>%
+  mutate_all(~ cell_spec(.,
+                         format = "html",
+                         color = ifelse(as.numeric(.) < 0.05, "white", "black"),
+                         background = ifelse(as.numeric(.) < 0.05, "red", "white")))
+```
+\ 
+
+**Dunn's Test to compare monthly means** 
+`r kable(matrix_coloured, escape = FALSE, align = "c")`
+\ 
+
+#### Temporal Model
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Temporal CPUE model
+CPUE_temp_model <- gam (CPUE ~ s (grid, bs = "re")
+                        + s (month, k = 12, bs = "cc")
+                        + s (year, k = 8, bs = "cr")
+                        + ti (year, month, k = c (10,12), bs = c ("cr", "cc"))
+                        , family = tw,
+                        data = serie_train,
+                        method = "REML",
+                        select = T, 
+                        gamma = 1,
+                        knots = list (month = c (0.5, 12.5)),
+                        correlation = corAR1(form = ~ 1 | year)
+                        )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (CPUE_temp_model)
+cat ("---- k check ----")
+k.check (CPUE_temp_model)
+appraise (CPUE_temp_model, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(CPUE_temp_model[["fitted.values"]]))/(mean(CPUE_temp_model[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (CPUE_temp_model))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (CPUE_temp_model, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$CPUE, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(CPUE_temp_model), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$CPUE, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_CPUE <- lm (serie_test$CPUE ~ test[,1])
+abline (lm_CPUE, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_CPUE)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 4))
+par (mar = c (3, 3, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(CPUE_temp_model, scheme = c (1,1,1,2), pch = 1, main = "", residuals (CPUE_temp_model, type = "deviance"))
+```
+
+### Sea bottom temperature
+
+#### Descriptive statistics
+
+```{r, echo = F, warning = F, fig.align ='center', fig.height = 4, fig.width = 16}
+# Line Plot
+ts_temp <- ggplot (data, aes (x = month_year, y = temp)) +
+  geom_line (size = 1, color = colour_line) +
+  labs (y = "Temp (°C)") +
+  scale_y_continuous (limits = c (23, 29), 
+                      breaks = seq (23, 29, by = 2)) +
+  scale_x_date (date_breaks = "12 months", 
+                date_labels = "%Y", 
+                limits = c (as.Date ("2001-09-01"), NA)) +
+  theme_ts
+
+# Boxplot
+bp_temp <- ggplot(data, aes(x = month_abb, y = temp)) +
+  geom_boxplot (color = colour_line, 
+                fill = colour_ribbon, 
+                alpha = 0.5)  +
+  scale_y_continuous (limits = c (23, 29), 
+                      breaks = seq (23, 29, by = 2)) +
+  theme_bp
+
+# plot to compose Figure 2
+plot1_temp <- ts_temp +
+  theme (axis.text.x = element_text (size = 18, 
+                                     angle = 90, 
+                                     vjust = 0.5))
+plot2_temp <- bp_temp +
+  theme (axis.text.x = element_text (size = 18, 
+                                     angle = 90, 
+                                     vjust = 0.5))
+
+# Combine lineplot and boxplot
+plot_temp <- plot_grid (
+  plot1_temp, plot2_temp, 
+  labels = c ("c", "d"), 
+  label_size = 20, 
+  ncol = 2, 
+  nrow = 1, 
+  rel_widths = c (2, 1), 
+  height = 3, 
+  width = 15, 
+  label_x = c (0.06, 0.03), 
+  label_y = c (0.98, 0.98),
+  align = "hv",
+  axis = "bt")
+print (plot_temp)
+```
+\ 
+
+Measures of central tendency and dispersion
+```{r, echo = F}
+# Measures of central tendency and dispersion
+summary (data$temp)
+# N
+paste0 ("N = ", sum(!is.na(data$temp)))
+```
+
+```{r, echo = F}
+# Annual mean and se
+annual_mean <- data %>%
+  group_by (year) %>%
+  summarise (annual_mean = round (mean (temp, na.rm = TRUE), digits = 1),
+             se = round (sqrt (var (temp, na.rm = TRUE) / n()), digits = 1))
+opts <- options(knitr.kable.NA = "")
+kable (annual_mean, align = "c")
+```
+
+```{r, echo = F}
+# Monthly mean and se
+monthly_mean <- data %>%
+  group_by (month) %>%
+  summarise (monthly_mean = round (mean (temp, na.rm = TRUE), digits = 1),
+             se = round (sqrt (var (temp, na.rm = TRUE) / n()), digits = 1))
+
+kable (monthly_mean, align = "c")
+```
+
+#### Shapiro-Wilk Normality Test
+
+```{r, echo = F, warning = F, fig.align ='center', fig.height = 4, fig.width = 12}
+## Shapiro-Wilk Normality Test
+shapiro_result <- shapiro.test (data$temp)
+
+# Create a ggplot histogram
+histogram <- ggplot (data, aes (x = temp)) +
+  geom_histogram (binwidth = 0.7, color = "black", fill = "white") +
+  ggtitle (paste ("Shapiro-Wilk test: p =", round (shapiro_result$p.value, 3))) +
+  xlab ("Sea Bottom Temperature (°C)") +
+  ylab ("Density")
+
+# Add a normal distribution curve scaled by 200
+histogram <- histogram + 
+  stat_function (
+    fun = function (x) 200 * dnorm (x, mean = mean (data$temp, na.rm = TRUE), 
+                                    sd = sd (data$temp, na.rm = TRUE)), color = "red")
+# Create a ggplot Q-Q plot
+qqplot <- ggplot (data, aes (sample = temp)) +
+          stat_qq () +
+          stat_qq_line () +
+          ggtitle (paste ("Q-Q plot"))
+   
+# Arrange histogram and Q-Q plot
+grid.arrange (histogram, qqplot, nrow = 1)
+```
+
+#### Seasonal variation (Kruskal-Wallis and Dunn's Test)
+
+```{r echo = F}
+# Kruskal-Wallis Test
+kruskal.test (data$temp, data$month)
+```
+
+```{r, include = F}
+# Dunn's Test
+dunn_result <- dunn.test (data$temp, data$month)
+
+# transform comparisons to data frame
+comparison_df <- data.frame (comparison = dunn_result$comparisons)
+
+# Separate the numbers 'i' and 'j' in the comparisons.
+comparison_df <- separate (comparison_df, comparison, c ("i", "j"), sep = " - ")
+
+# Add 0 before the values, except for '10', '11', and '12'
+comparison_df$i <- ifelse (comparison_df$i %in% c ("10", "11", "12"), comparison_df$i, paste0 ("0", comparison_df$i))
+comparison_df$j <- ifelse (comparison_df$j %in% c ("10", "11", "12"), comparison_df$j, paste0 ("0", comparison_df$j))
+
+# Add adjusted p-values to data frame
+comparison_df$p_value_adj <- round (dunn_result$P.adjusted, digits = 4)
+
+# Duplicate dataframes
+comparison_df2 <- comparison_df %>% 
+  select (i = j, j = i, p_value_adj)
+
+# Bind dataframes
+comparison_df <- rbind (comparison_df, comparison_df2)
+
+# Create matrix
+matrix_result <- acast (comparison_df, i ~ j, value.var = "p_value_adj")
+
+# Create values for same month
+matrix_result <- ifelse (is.na (matrix_result), 1, matrix_result)
+
+# Colors to signficant p-values
+matrix_coloured <- as.data.frame(matrix_result)
+matrix_coloured <- matrix_coloured %>%
+  mutate_all(~ cell_spec(.,
+                         format = "html",
+                         color = ifelse(as.numeric(.) < 0.05, "white", "black"),
+                         background = ifelse(as.numeric(.) < 0.05, "red", "white")))
+```
+\ 
+
+**Dunn's Test to compare monthly means** 
+`r kable(matrix_coloured, escape = FALSE, align = "c")`
+\  
+
+#### Temporal Model
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Temporal temp model
+temp_temp_model <- gam (temp ~ s (month, k = 12, bs = "cc")
+                        + s (year, k = 6, bs = "cr")
+                        + ti(year, month, k = c (6,12), bs = c ("cr", "cc"))
+               , family = gaussian (link = identity),
+               data = serie_train,
+               method = "REML",
+               select = T, 
+               gamma = 1,
+               knots = list (month = c (0.5, 12.5)),
+               correlation = corAR1(form = ~ 1 | year)
+               )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (temp_temp_model)
+cat ("---- k check ----")
+k.check (temp_temp_model)
+appraise(temp_temp_model, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(temp_temp_model[["fitted.values"]]))/(mean(temp_temp_model[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (temp_temp_model))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (temp_temp_model, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$temp, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(temp_temp_model), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$temp, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_temp <- lm (serie_test$temp ~ test[,1])
+abline (lm_temp, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_temp)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 3))
+par (mar = c (3, 3, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(temp_temp_model, scheme = c (1,1,2), pch = 1, main = "", residuals (temp_temp_model, type = "deviance"), seWithMean = T)
+```
+
+### PP
+
+#### Descriptive statistics
+
+```{r, echo = F, warning = F, fig.align = 'center', fig.height = 4, fig.width = 16}
+# Line Plot
+ts_PP <- ggplot (data, aes (x = month_year, y = PP)) +
+  geom_line (size = 1, 
+             color = colour_line) +
+  labs (y = "PP (mg/m³)") +
+  ylim (0, 3300) +
+  scale_x_date (date_breaks = "12 months", 
+                date_labels = "%Y", 
+                limits = c (as.Date ("2001-09-01"), NA)) +
+  theme_ts + 
+  theme (axis.text.y = element_text(angle = 90, 
+                                    hjust = 0.5))
+  
+
+# Boxplot
+bp_PP <- ggplot (data, aes (x = month_abb, y = PP)) +
+  geom_boxplot (color = colour_line, 
+                fill = colour_ribbon, 
+                alpha = 0.5)  +
+  ylim (0, 3300) +
+  theme_bp
+
+# plot to compose Figure 2
+plot1_PP <- ts_PP +
+  theme (axis.text.x = element_text (size = 18, 
+                                     angle = 90, 
+                                     vjust = 0.5))
+plot2_PP <- bp_PP +
+  theme (axis.text.x = element_text (size = 18,
+                                     angle = 90, 
+                                     vjust = 0.5))
+
+# Combine lineplot and boxplot
+plot_PP <- plot_grid (
+  plot1_PP, plot2_PP, 
+  labels =  c ("e", "f"), 
+  label_size = 20, 
+  ncol = 2, 
+  nrow = 1, 
+  rel_widths = c (2, 1), 
+  height = 3, 
+  width = 15, 
+  label_x = c (0.06, 0.03), 
+  label_y = c (0.98, 0.98),
+  align = "hv",
+  axis = "bt")
+print (plot_PP)
+```
+\ 
+
+Measures of central tendency and dispersion
+```{r, echo = F}
+# Measures of central tendency and dispersion
+summary (data$PP)
+# N
+paste0 ("N = ", sum(!is.na(data$PP)))
+```
+
+```{r, echo = F}
+# Annual mean and se
+annual_mean <- data %>%
+  group_by (year) %>%
+  summarise (annual_mean = round (mean (PP, na.rm = TRUE)),
+             se = round (sqrt (var (PP, na.rm = TRUE) / n())))
+opts <- options(knitr.kable.NA = "")
+kable (annual_mean, align = "c")
+```
+
+```{r, echo = F}
+# Monthly mean and se
+monthly_mean <- data %>%
+  group_by (month) %>%
+  summarise (monthly_mean = round (mean (PP, na.rm = TRUE)),
+             se = round (sqrt (var (PP, na.rm = TRUE) / n())))
+
+kable (monthly_mean, align = "c")
+```
+
+#### Shapiro-Wilk Normality Test
+
+```{r, echo = F, warning = F, fig.align ='center', fig.height = 4, fig.width = 16}
+## Shapiro-Wilk Normality Test
+shapiro_result <- shapiro.test (data$PP)
+
+# Create a ggplot histogram
+histogram <- ggplot (data, aes (x = PP)) +
+  geom_histogram (binwidth = 100, color = "black", fill = "white") +
+  ggtitle (paste ("Shapiro-Wilk test: p =", round (shapiro_result$p.value, 3))) +
+  xlab ("Particulate Organic Carbon (mg/m³)") +
+  ylab ("Density")
+
+# Add a normal distribution curve scaled by 30000
+histogram <- histogram + 
+  stat_function (
+    fun = function (x) 30000 * dnorm (x, mean = mean (data$PP, na.rm = TRUE), 
+                                    sd = sd(data$PP, na.rm = TRUE)), color = "red")
+# Create a ggplot Q-Q plot
+qqplot <- ggplot (data, aes (sample = PP)) +
+          stat_qq () +
+          stat_qq_line () +
+          ggtitle (paste ("Q-Q plot"))
+   
+# Arrange histogram and Q-Q plot
+grid.arrange (histogram, qqplot, nrow = 1)
+```
+
+#### Seasonal variation (Kruskal-Wallis and Dunn's Test)
+
+```{r echo = F}
+# Kruskal-Wallis Test
+kruskal.test (data$PP, data$month)
+```
+
+```{r, include = F}
+# Dunn's Test
+dunn_result <- dunn.test (data$PP, data$month)
+
+# transform comparisons to data frame
+comparison_df <- data.frame (comparison = dunn_result$comparisons)
+
+# Separate the numbers 'i' and 'j' in the comparisons.
+comparison_df <- separate (comparison_df, comparison, c ("i", "j"), sep = " - ")
+
+# Add 0 before the values, except for '10', '11', and '12'
+comparison_df$i <- ifelse (comparison_df$i %in% c ("10", "11", "12"), comparison_df$i, paste0 ("0", comparison_df$i))
+comparison_df$j <- ifelse (comparison_df$j %in% c ("10", "11", "12"), comparison_df$j, paste0 ("0", comparison_df$j))
+
+# Add adjusted p-values to data frame
+comparison_df$p_value_adj <- round (dunn_result$P.adjusted, digits = 4)
+
+# Duplicate dataframes
+comparison_df2 <- comparison_df %>% 
+  select (i = j, j = i, p_value_adj)
+
+# Bind dataframes
+comparison_df <- rbind (comparison_df, comparison_df2)
+
+# Create matrix
+matrix_result <- acast (comparison_df, i ~ j, value.var = "p_value_adj")
+
+# Create values for same month
+matrix_result <- ifelse (is.na (matrix_result), 1, matrix_result)
+
+# Colors to signficant p-values
+matrix_coloured <- as.data.frame(matrix_result)
+matrix_coloured <- matrix_coloured %>%
+  mutate_all(~ cell_spec(.,
+                         format = "html",
+                         color = ifelse(as.numeric(.) < 0.05, "white", "black"),
+                         background = ifelse(as.numeric(.) < 0.05, "red", "white")))
+```
+\ 
+
+**Dunn's Test to compare monthly means** 
+`r kable(matrix_coloured, escape = FALSE, align = "c")`
+\ 
+
+#### Temporal Model
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Temporal PP model
+PP_temp_model <- gam (PP ~ s (month, k = 12, bs = "cc")
+                      + s (year, k = 10, bs = "cr")
+                      + ti(year, month, k = c (10,12), bs = c ("cr", "cc"))
+                      , family = tw,
+                      data = serie_train,
+                      method = "REML",
+                      select = T, 
+                      gamma = 1,
+                      knots = list (month = c (0.5, 12.5)),
+                      correlation = corAR1(form = ~ 1 | year)
+                      )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (PP_temp_model)
+cat ("---- k check ----")
+k.check (PP_temp_model)
+appraise(PP_temp_model, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(PP_temp_model[["fitted.values"]]))/(mean(PP_temp_model[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (PP_temp_model))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (PP_temp_model, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$PP, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(PP_temp_model), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$PP, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_PP <- lm (serie_test$PP ~ test[,1])
+abline (lm_PP, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_PP)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 3))
+par (mar = c (3, 3, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(PP_temp_model, scheme = c (1,1,2), pch = 1, main = "", residuals (PP_temp_model, type = "deviance"), seWithMean = T)
+```
+
+### River flow
+
+#### Descriptive statistics
+
+```{r, echo = F, warning = F, fig.align ='center', fig.height = 4, fig.width = 16}
+# Line Plot
+ts_flow <- ggplot (data, aes (x = month_year, y = flow)) +
+  geom_line (size = 1, color = colour_line) +
+  labs (x = "", y = "Flow (m³/s)") +
+  scale_x_date (date_breaks = "12 months", 
+                date_labels = "%Y", 
+                limits = c (as.Date ("2001-09-01"), NA)) +
+  theme_ts +
+  theme (axis.text.x = element_text (angle = 90,
+                                     vjust = 0.5))
+
+# Boxplot
+bp_flow <- ggplot (data, aes (x = month_abb, y = flow)) +
+  geom_boxplot (color = colour_line, 
+                fill = colour_ribbon, 
+                alpha = 0.5) +
+  labs (x = "") +
+  theme_bp +
+  theme (axis.text.x = element_text (angle = 90,
+                                     vjust = 0.5))
+
+# Combine lineplot and boxplot
+serie.flow <- plot_grid (
+  ts_flow, bp_flow, 
+  labels = c ("g", "h"), 
+  label_size = 20, 
+  ncol = 2, 
+  nrow = 1, 
+  rel_widths = c (2, 1),
+  height = 3, 
+  width = 15, 
+  label_x = c (0.06, 0.03), 
+  label_y = c (0.98, 0.98),
+  align = "hv",
+  axis = "bt")
+print (serie.flow)
+```
+\ 
+
+Measures of central tendency and dispersion
+```{r, echo = F}
+# Measures of central tendency and dispersion
+summary (data$flow)
+# N
+paste0 ("N = ", sum(!is.na(data$flow)))
+```
+
+```{r, echo = F}
+# Annual mean and se
+annual_mean <- data %>%
+  group_by (year) %>%
+  summarise (annual_mean = round (mean (flow, na.rm = TRUE), digits = 1),
+             se = round (sqrt (var (flow, na.rm = TRUE) / n()), digits = 1))
+opts <- options(knitr.kable.NA = "")
+kable (annual_mean, align = "c")
+```
+
+```{r, echo = F}
+# Monthly mean and se
+monthly_mean <- data %>%
+  group_by (month) %>%
+  summarise (monthly_mean = round (mean (flow, na.rm = TRUE), digits = 1),
+             se = round (sqrt (var (flow, na.rm = TRUE) / n()), digits = 1))
+
+kable (monthly_mean, align = "c")
+```
+
+#### Shapiro-Wilk Normality Test
+
+```{r, echo = F, warning = F, fig.align ='center', fig.height = 4, fig.width = 12}
+## Shapiro-Wilk Normality Test
+shapiro_result <- shapiro.test (data$flow)
+
+# Create a ggplot histogram
+histogram <- ggplot (data, aes (x = flow)) +
+  geom_histogram (binwidth = 5, color = "black", fill = "white") +
+  ggtitle (paste ("Shapiro-Wilk test: p =", round (shapiro_result$p.value, 3))) +
+  xlab ("River Flow (m³/s)") +
+  ylab ("Density")
+
+# Add a normal distribution curve scaled by 2000
+histogram <- histogram + 
+  stat_function (
+    fun = function (x) 2000 * dnorm (x, mean = mean (data$flow, na.rm = TRUE), 
+                                    sd = sd (data$flow, na.rm = TRUE)), color = "red")
+# Create a ggplot Q-Q plot
+qqplot <- ggplot (data, aes (sample = flow)) +
+          stat_qq () +
+          stat_qq_line () +
+          ggtitle (paste ("Q-Q plot"))
+   
+# Arrange histogram and Q-Q plot
+grid.arrange (histogram, qqplot, nrow = 1)
+```
+
+#### Seasonal variation (Kruskal-Wallis and Dunn's Test)
+
+```{r echo = F}
+# Kruskal-Wallis Test
+kruskal.test (data$flow, data$month)
+```
+
+```{r, include = F}
+# Dunn's Test
+dunn_result <- dunn.test (data$flow, data$month)
+
+# transform comparisons to data frame
+comparison_df <- data.frame (comparison = dunn_result$comparisons)
+
+# Separate the numbers 'i' and 'j' in the comparisons.
+comparison_df <- separate (comparison_df, comparison, c ("i", "j"), sep = " - ")
+
+# Add 0 before the values, except for '10', '11', and '12'
+comparison_df$i <- ifelse (comparison_df$i %in% c ("10", "11", "12"), comparison_df$i, paste0 ("0", comparison_df$i))
+comparison_df$j <- ifelse (comparison_df$j %in% c ("10", "11", "12"), comparison_df$j, paste0 ("0", comparison_df$j))
+
+# Add adjusted p-values to data frame
+comparison_df$p_value_adj <- round (dunn_result$P.adjusted, digits = 4)
+
+# duplicate data frame
+comparison_df2 <- comparison_df %>% 
+  select (i = j, j = i, p_value_adj)
+
+# Bind dataframes
+comparison_df <- rbind (comparison_df, comparison_df2)
+
+# Create matrix
+matrix_result <- acast (comparison_df, i ~ j, value.var = "p_value_adj")
+
+# Create values for same month
+matrix_result <- ifelse (is.na (matrix_result), 1, matrix_result)
+
+# Colors to signficant p-values
+matrix_coloured <- as.data.frame(matrix_result)
+matrix_coloured <- matrix_coloured %>%
+  mutate_all(~ cell_spec(.,
+                         format = "html",
+                         color = ifelse(as.numeric(.) < 0.05, "white", "black"),
+                         background = ifelse(as.numeric(.) < 0.05, "red", "white")))
+```
+\ 
+
+**Dunn's Test to compare monthly means** 
+`r kable(matrix_coloured, escape = FALSE, align = "c")`
+\ 
+
+#### Temporal Model
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Temporal flow model
+flow_temp_model <- gam (flow ~ s (month, k = 12, bs = "cc")
+                        + s (year, k = 6, bs = "cr")
+                        + ti(year, month, k = c (6,12), bs = c ("cr", "cc"))
+                        , family = tw,
+                        data = serie_train,
+                        method = "REML",
+                        select = T, 
+                        gamma = 1,
+                        knots = list (month = c (0.5, 12.5)),
+                        correlation = corAR1(form = ~ 1 | year)
+                        )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (flow_temp_model)
+cat ("---- k check ----")
+k.check (flow_temp_model)
+appraise(flow_temp_model, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(flow_temp_model[["fitted.values"]]))/(mean(flow_temp_model[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (flow_temp_model))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (flow_temp_model, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$flow, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(flow_temp_model), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$flow, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_flow <- lm (serie_test$flow ~ test[,1])
+abline (lm_flow, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_flow)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 3))
+par (mar = c (3, 3, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(flow_temp_model, scheme = c (1,1,2), pch = 1, main = "", residuals (flow_temp_model, type = "deviance"))
+```
+
+## CPUE models
+
+### Sea bottom temperature
+
+#### CPUE model as function of isolated factors
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Model
+CPUExtemp <- gam (CPUE ~ 
+                    s (grid, bs = "re")
+                  + s (temp, k = 8, bs = "tp")
+                  , family = tw,
+                  data = serie_train,
+                  method = "REML",
+                  select = T, 
+                  gamma = 1.2,
+                  )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (CPUExtemp)
+cat ("---- k check ----")
+k.check (CPUExtemp)
+appraise(CPUExtemp, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(CPUExtemp[["fitted.values"]]))/(mean(CPUExtemp[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (CPUExtemp))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (CPUExtemp, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$CPUE, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(CPUExtemp), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$CPUE, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_CPUExtemp <- lm (serie_test$CPUE ~ test[,1])
+abline (lm_CPUExtemp, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_CPUExtemp)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 2))
+par (mar = c (2.5, 2.5, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(CPUExtemp, scheme = 1, main = "", seWithMean = T)
+```
+
+#### CPUE model as function of tensor product of variables and months
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Model
+CPUExtemp_month <- gam (CPUE ~ 
+                          s (grid, bs = "re")
+                        + te (temp, month, k = c (12, 12), bs = c ("tp", "cc"))
+                        , family = tw,
+                        data = serie_train,
+                        method = "REML",
+                        select = T, 
+                        gamma = 1,
+                        knots = list (month = c (0.5, 12.5))
+                        )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (CPUExtemp_month)
+cat ("---- k check ----")
+k.check (CPUExtemp_month)
+appraise(CPUExtemp_month, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(CPUExtemp_month[["fitted.values"]]))/(mean(CPUExtemp_month[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (CPUExtemp_month))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (CPUExtemp_month, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$CPUE, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(CPUExtemp_month), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$CPUE, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_CPUExtemp_month <- lm (serie_test$CPUE ~ test[,1])
+abline (lm_CPUExtemp_month, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_CPUExtemp_month)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 2))
+par (mar = c (2.5, 2.5, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(CPUExtemp_month, scheme = 2, main = "")
+```
+
+### PP
+
+#### CPUE model as function of isolated factor
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Model
+CPUExPP <- gam (CPUE ~ 
+                  s (grid, bs = "re")
+                + s (PP, k = 10, bs = "tp")
+                , family = tw,
+                data = serie_train,
+                method = "REML",
+                select = T, 
+                gamma = 1
+                )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (CPUExPP)
+cat ("---- k check ----")
+k.check (CPUExPP)
+appraise(CPUExPP, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(CPUExPP[["fitted.values"]]))/(mean(CPUExPP[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (CPUExPP))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (CPUExPP, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$CPUE, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(CPUExPP), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$CPUE, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_CPUExPP <- lm (serie_test$CPUE ~ test[,1])
+abline (lm_CPUExPP, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_CPUExPP)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 2))
+par (mar = c (2.5, 2.5, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(CPUExPP, scheme = 1, main = "", seWithMean = T)
+```
+
+#### CPUE model as function of tensor product of variable and months
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Model
+CPUExPP_month <- gam (CPUE ~ 
+                        s (grid, bs = "re")
+                      + te (PP, month, k = c (12, 12), bs = c ("tp", "cc"))
+                      , family = tw,
+                      data = serie_train,
+                      method = "REML",
+                      select = T, 
+                      gamma = 1,
+                      knots = list (month = c (0.5, 12.5))
+                      )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (CPUExPP_month)
+cat ("---- k check ----")
+k.check (CPUExPP_month)
+appraise(CPUExPP_month, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(CPUExPP_month[["fitted.values"]]))/(mean(CPUExPP_month[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (CPUExPP_month))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (CPUExPP_month, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$CPUE, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(CPUExPP_month), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$CPUE, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_CPUExPP_month <- lm (serie_test$CPUE ~ test[,1])
+abline (lm_CPUExPP_month, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_CPUExPP_month)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 2))
+par (mar = c (2.5, 2.5, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(CPUExPP_month, scheme = 2, main = "")
+```
+
+### River flow
+
+#### CPUE model as function of isolated factors
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Model
+CPUExflow <- gam (CPUE ~
+                    s (grid, bs = "re")
+                  + s (flow, k = 12, bs = "tp")
+                  , family = tw,
+                  data = serie_train,
+                  method = "REML",
+                  select = T, 
+                  gamma = 1
+                  )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (CPUExflow)
+cat ("---- k check ----")
+k.check (CPUExflow)
+appraise(CPUExflow, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(CPUExflow[["fitted.values"]]))/(mean(CPUExflow[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (CPUExflow))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (CPUExflow, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$CPUE, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(CPUExflow), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$CPUE, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_CPUExflow <- lm (serie_test$CPUE ~ test[,1])
+abline (lm_CPUExflow, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_CPUExflow)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 2))
+par (mar = c (2.5, 2.5, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(CPUExflow, scheme = 1, main = "", rug = T, seWithMean = T)
+```
+
+#### CPUE model as function of tensor product of variables and months
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+#### Model
+CPUExflow_month <- gam (CPUE ~ 
+                          s (grid, bs = "re")
+                        + te (flow, month, k = c (12, 12), bs = c ("tp", "cc"))
+                        , family = tw,
+                        data = serie_train,
+                        method = "REML",
+                        select = T, 
+                        gamma = 1,
+                        knots = list (month = c (0.5, 12.5))
+                        )
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (CPUExflow_month)
+cat ("---- k check ----")
+k.check (CPUExflow_month)
+appraise(CPUExflow_month, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(CPUExflow_month[["fitted.values"]]))/(mean(CPUExflow_month[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (CPUExflow_month))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (CPUExflow_month, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$CPUE, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(CPUExflow_month), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$CPUE, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_CPUExflow_month <- lm (serie_test$CPUE ~ test[,1])
+abline (lm_CPUExflow_month, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_CPUExflow_month)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 2))
+par (mar = c (2.5, 2.5, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(CPUExflow_month, scheme = 2, main = "", rug = T)
+```
+
+### CPUE models as function additive factors
+
+#### Single index model
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+# Single index model of CPUE
+CPUE1 <- gam (CPUE ~ 
+                s (month_count, k = 10, bs = "cr", m = 2)
+              + s (temp, k = 10, bs = "tp")
+              + s (PP, k = 50, bs = "cr")
+              + s (flow, k = 10, bs = "cr")
+              + s (grid, bs = "re")
+              , family = tw,
+              data = serie_train,
+              method = "REML",
+              select = T,
+              gamma = 1.4)
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (CPUE1)
+cat ("---- k check ----")
+k.check (CPUE1)
+appraise(CPUE1, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(CPUE1[["fitted.values"]]))/(mean(CPUE1[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (CPUE1))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (CPUE1, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$CPUE, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(CPUE1), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$CPUE, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_CPUE1 <- lm (serie_test$CPUE ~ test[,1])
+abline (lm_CPUE1, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_CPUE1)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 5))
+par (mar = c (2.5, 2.5, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(CPUE1, scheme = 1, main = "", rug = T, seWithMean = T)
+```
+
+#### Seasonal Interaction Model
+
+```{r, echo = F, fig.align ='center', fig.height = 4, fig.width = 14}
+# Seasonal Interaction Model
+CPUE2 <- gam (CPUE ~ 
+                s (month_count, k = 10, bs = "cr", m = 2)
+              + te (temp, month, k = c (10,12), bs = c ("cr", "cc"))
+              + te (PP,   month, k = c (10,12), bs = c ("cr", "cc"))
+              + te (flow, month, k = c (10,12), bs = c ("cr", "cc"))
+              , family = tw,
+              data = serie_train,
+              method = "ML",
+              select = T,
+              knots = list (month = c (0.5, 12.5)),
+              gamma = 1.4)
+
+#### Verifying model diagnosis
+
+# Gam check
+cat ("---- Model summary ----")
+summary (CPUE2)
+cat ("---- k check ----")
+k.check (CPUE2)
+appraise(CPUE2, nrow = 1)
+
+# Average percentage deviation
+cat ("Average percentage deviation =",
+     (round(100-((mean(CPUE2[["fitted.values"]]))/(mean(CPUE2[["y"]])))*100,2)),
+     "%")
+
+# Akaike Information Criterion
+cat ("AIC =", AIC (CPUE2))
+
+#### Predictability test
+
+# Test
+test <- as.data.frame (predict.gam (CPUE2, serie_test, type="response"))
+
+# Pearson correlation between predicted and observed values
+correlation <- cor(test[,1], serie_test$CPUE, use = "pairwise.complete.obs")
+
+#### Diagnosis and predicatability plots
+
+par (mfrow = c (1, 2))
+# Autocorrelation
+acf (residuals(CPUE2), main = "Autocorrelation function")
+
+{
+# Plot Predicted vs Observed values"
+plot(test[,1], serie_test$CPUE, 
+     xlab = "Predicted Values", 
+     ylab = "Observed Values", 
+     main = "Predicted vs Observed values")
+# Adjust and add  regression line to plot
+lm_CPUE2 <- lm (serie_test$CPUE ~ test[,1])
+abline (lm_CPUE2, col = "red")
+# Add legend
+legend("topleft", 
+       legend = paste(
+         paste("R² =", round(summary(lm_CPUE2)$r.squared, 2)),
+         paste("r =", format(correlation, digits = 3)),
+         sep = "\n"),
+       col = "red", lty = 1, cex = 0.8)
+}
+
+## Plot GAM result
+# Define parameters
+par (mfrow = c (1, 4))
+par (mar = c (2.5, 2.5, 1, 1))
+par (mgp = c (1.6, 0.7, 0))
+# Plot
+plot.gam(CPUE2, scheme = c(1,2,2,2), main = "", rug = T)
+```
+
+## Figures e Tables
+\ 
+
+**Table 1:** Statistical Results of the Generalized Additive Models (GAMs) Fitted to CPUE and Environmental Variables. The models are organized into three analytical blocks: (i) Univariate Temporal Models of the environmental variables (PP, Temperature, and Flow); (ii) Bivariate CPUE Models exploring the effects of each covariate in contemporaneous, seasonal, and distributed lag formats; and (iii) Multivariate Models, including a Single Index Model and a Distributed Lag Model for overall CPUE prediction.
+
+```{r, echo = F}
+# List of objects of GAM
+model_list <- list(
+  "CPUE ~ Time" = CPUE_temp_model,
+  "Temp ~ Time" = temp_temp_model,
+  "PP ~ Time" = PP_temp_model,
+  "Flow ~ Time" = flow_temp_model,
+  "CPUE ~ Temp" = CPUExtemp,
+  "CPUE ~ Temp x Month" = CPUExtemp_month,
+  "CPUE ~ PP" = CPUExPP,
+  "CPUE ~ PP x Month" = CPUExPP_month,
+  "CPUE ~ Flow" = CPUExflow,
+  "CPUE ~ Flow x Month" = CPUExflow_month,
+  "Single Index Model" = CPUE1,
+  "Seasonal Interaction Model" = CPUE2
+  )
+
+# List of objects of prediction
+lm_list <- list(
+  "CPUE ~ Time" = lm_CPUE,
+  "Temp ~ Time" = lm_temp,
+  "PP ~ Time" = lm_PP,
+  "Flow ~ Time" = lm_flow,
+  "CPUE ~ Temp" = lm_CPUExtemp,
+  "CPUE ~ Temp x Month" = lm_CPUExtemp_month,
+  "CPUE ~ PP" = lm_CPUExPP,
+  "CPUE ~ PP x Month" = lm_CPUExPP_month,
+  "CPUE ~ Flow" = lm_CPUExflow,
+  "CPUE ~ FlowxMonth" = lm_CPUExflow_month,
+  "Single Index Model" = lm_CPUE1,
+  "Seasonal Interaction Model" = lm_CPUE2
+  )
+
+# Model Components
+Table_1 <- map_dfr(
+  model_list,
+  ~ as.data.frame(broom::tidy(.)),
+  .id = "Model"
+) %>%
+  mutate(
+    `p-value` = round(p.value, 3),
+    statistic = round(statistic, 2),
+    edf = round(edf, 2),
+    `F` = statistic,
+    `Ref. df` = ref.df,
+    Term = term
+  ) %>%
+  select(Model, Term, edf, `Ref. df`, `F`, `p-value`)
+
+
+# GAM metrics extraction
+table1_2 <- map_dfr(
+  model_list,
+  ~ tibble(
+    Family = as.character(.$call)[3],
+    Intercept = round(.$coefficients[1], 2),
+    AIC = round(.$aic, 0),
+    `Deviance explained` = round(summary(.)$dev.expl * 100, 1),
+    `R² ajusted` = round(summary(.)$r.sq, 3)
+  ),
+  .id = "Model"
+)
+
+# Predictive R² extraction
+pred_r_sq_df <- map_dfr(
+  lm_list,
+  ~ tibble(`R² of prediction` = round(summary(.)$r.squared, 3)),
+  .id = "Model"
+)
+
+# Final Merge and cleaning table
+Table_1 <- left_join(Table_1, table1_2, by = "Model") %>%
+  left_join(pred_r_sq_df, by = "Model") %>%
+  group_by(Model) %>%
+  mutate(
+    across(
+      .cols = c(Family, Intercept, AIC, `Deviance explained`, `R² ajusted`, `R² of prediction`),
+      .fns = ~ ifelse(row_number() > 1, NA, .)
+    )
+  ) %>%
+  ungroup() %>%
+  select(
+    Model,
+    Term,
+    Family,
+    Intercept,
+    AIC,
+    `Deviance explained`,
+    `R² ajusted`,
+    `R² of prediction`,
+    edf,
+    `Ref. df`,
+    `F`,
+    `p-value`
+  )
+
+# Print table
+kable (Table_1, align = "c")
+```
+\
+
+```{r, echo = F, warning = F, fig.align ='center', fig.height = 10, fig.width = 11.5}
+##################
+#### Figure 2 ####
+##################
+
+# Set up theme to reduce margim
+theme_ts <- theme(plot.margin = margin(2, 0, 2, 0))
+theme_bp <- theme(plot.margin = margin(2, 0, 2, 0))
+
+# Time series and boxplot list
+plot_list <- list(
+  ts_CPUE + theme_ts,
+  bp_CPUE + theme_bp, 
+  ts_temp + theme_ts, 
+  bp_temp + theme_bp, 
+  ts_PP   + theme_ts,   
+  bp_PP   + theme_bp, 
+  ts_flow + theme_ts, 
+  bp_flow + theme_bp
+  )
+
+# Combine plots
+Figure_2 <- plot_grid(
+  plotlist = plot_list,
+  labels = c(
+    "a", "b", 
+    "c", "d", 
+    "e", "f", 
+    "g", "h"
+    ),
+  label_x = c(
+    0.08, 0.15, 
+    0.08, 0.15, 
+    0.08, 0.15, 
+    0.08, 0.15
+    ),
+  label_y = 0.98,
+  rel_heights = c(1, 1, 1, 1.2),
+  rel_widths = c(2, 1),
+  label_size = 18,
+  label_fontface = "bold",
+  ncol = 2,
+  align = "v",
+  axis = "bt"
+)
+Figure_2
+```
+**Fig. 2.** Time series and monthly distribution of environmental variables and CPUE. The left column (a, c, e, g) displays the time series of monthly averages for CPUE (a), PP (c), Temp (e), and Flow (g) from Sep/01 to Mar/20. The right column (b, d, f, h) presents boxplots of these monthly averages, where the central line indicates the median, the box edges mark the 1st and 3rd quartiles, the whiskers extend to 1.5 times the interquartile range, and the individual points are outliers.
+\ 
+
+```{r, echo = F, fig.align ='center', fig.height = 10, fig.width = 11.5, warning = F}
+###################
+#### Figure 3 #####
+###################
+
+####################
+#### CPUE PLOT #####
+####################
+
+# Extract p-value of s(month)
+p_value_m <- summary(CPUE_temp_model)$s.table["s(month)", "p-value"]
+p_text_m <- ifelse(p_value_m < 0.001, "p < 0.001", 
+                   paste0("p = ",format(round(p_value_m, 3),
+                                        nsmall = 3)))
+
+# Extract p-value of s(year)
+p_value_y <- summary(CPUE_temp_model)$s.table["s(year)", "p-value"]
+p_text_y <- ifelse(p_value_y < 0.001, "p < 0.001", 
+                   paste0("p = ", format(round(p_value_y, 3), 
+                                         nsmall = 3)))
+
+# Create base plot
+plot1_CPUE_temp <- draw(CPUE_temp_model, 
+           select = 2, 
+           residuals = T)
+
+# Change colours 
+plot1_CPUE_temp$layers[[1]]$aes_params$colour <- colour_point
+plot1_CPUE_temp$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Plot 1: Partial effect of month
+plot1_CPUE_temp <- plot1_CPUE_temp +
+  geom_line(linewidth = 1.3) +
+  annotate ("text", 
+            x = 0.5, 
+            y = -1.7,   
+            label = p_text_m, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  ylim (-2,1) +
+  scale_x_continuous(breaks = 1:12) +
+  theme_m +
+  theme (axis.text.x = element_blank ())
+
+# Plot 2: Partial effect of year
+plot2_CPUE_temp <- draw(CPUE_temp_model, 
+                       select = 3, 
+                       residuals = T) 
+# Change colours 
+plot2_CPUE_temp$layers[[1]]$aes_params$colour <- colour_point
+plot2_CPUE_temp$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Plot 1: Partial effect of month
+plot2_CPUE_temp <- plot2_CPUE_temp +
+  geom_line(linewidth = 1.3) +
+  annotate ("text", 
+            x = 2000.5, 
+            y = -1.7,   
+            label = p_text_y, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(y = "CPUE") +
+  ylim (-2,1) +
+  theme_y +
+  theme (axis.text.x = element_blank ())
+
+###########################
+#### Temperature PLOT #####
+###########################
+
+# Extract p-value of s(month)
+p_value_m <- summary(temp_temp_model)$s.table["s(month)", "p-value"]
+p_text_m <- ifelse(p_value_m < 0.001, "p < 0.001", 
+                     paste0("p = ", format(round(p_value_m, 3), 
+                                           nsmall = 3)))
+
+# Extract p-value of s(year)
+p_value_y <- summary(temp_temp_model)$s.table["s(year)", "p-value"]
+p_text_y <- ifelse(p_value_y < 0.001, "p < 0.001", 
+                     paste0("p = ", format(round(p_value_y, 3), 
+                                           nsmall = 3)))
+
+# Plot 1: Partial effect of month
+plot1_temp_temp <- draw(temp_temp_model, 
+                       select = 1, 
+                       residuals = T)
+
+# Change colours 
+plot1_temp_temp$layers[[1]]$aes_params$colour <- colour_point
+plot1_temp_temp$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Plot 1: Partial effect of month
+plot1_temp_temp <- plot1_temp_temp +
+  geom_line(linewidth = 1.3) +
+  annotate ("text", 
+            x = 0.5, 
+            y = -1.7,   
+            label = p_text_m, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  ylim (-2,2) +
+  scale_x_continuous(breaks = 1:12) +
+  theme_m +
+  theme (axis.text.x = element_blank ())
+
+# Plot 2: Partial effect of year
+plot2_temp_temp <- draw(temp_temp_model, 
+                       select = 2, 
+                       residuals = T)
+
+# Change colours 
+plot2_temp_temp$layers[[1]]$aes_params$colour <- colour_point
+plot2_temp_temp$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Plot 1: Partial effect of month
+plot2_temp_temp <- plot2_temp_temp +
+  geom_line(linewidth = 1.3) +
+  annotate ("text", 
+            x = 2000.5, 
+            y = -1.7,   
+            label = p_text_y, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(y = "Temp") +
+  ylim (-2,2) +
+  theme_y +
+  theme (axis.text.x = element_blank ())
+
+##################
+#### PP PLOT #####
+##################
+
+# Extract p-value of s(month)
+p_value_m <- summary(PP_temp_model)$s.table["s(month)", "p-value"]
+p_text_m <- ifelse(p_value_m < 0.001, "p < 0.001", 
+                     paste0("p = ", format(round(p_value_m, 3), 
+                                           nsmall = 3)))
+
+# Extract p-value of s(year)
+p_value_y <- summary(PP_temp_model)$s.table["s(year)", "p-value"]
+p_text_y <- ifelse(p_value_y < 0.001, "p < 0.001", 
+                     paste0("p = ", format(round(p_value_y, 3), 
+                                           nsmall = 3)))
+
+# Plot 1: Partial effect of month
+plot1_PP_temp <- draw(PP_temp_model, 
+                       select = 1, 
+                       residuals = T)
+
+# Change colours 
+plot1_PP_temp$layers[[1]]$aes_params$colour <- colour_point
+plot1_PP_temp$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Plot 1: Partial effect of month
+plot1_PP_temp <- plot1_PP_temp +
+  geom_line(linewidth = 1.3) +
+  annotate ("text", 
+            x = 0.5, 
+            y = -0.8,   
+            label = p_text_m, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  ylim (-1,1) +
+  scale_x_continuous(breaks = 1:12) +
+  scale_y_continuous (limits = c (-1,1),
+                      breaks = c (-1, 0, 1)) +
+  theme_m +
+  theme (axis.text.x = element_blank ())
+
+# Plot 2: Partial effect of year
+plot2_PP_temp <- draw(PP_temp_model, 
+                       select = 2, 
+                       residuals = T)
+
+# Change colours 
+plot2_PP_temp$layers[[1]]$aes_params$colour <- colour_point
+plot2_PP_temp$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Plot 1: Partial effect of month
+plot2_PP_temp <- plot2_PP_temp +
+  geom_line(linewidth = 1.3) +
+  annotate ("text", 
+            x = 2000.5, 
+            y = -0.8,   
+            label = p_text_y, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(y = "PP") +
+  scale_y_continuous (limits = c (-1,1),
+                      breaks = c (-1, 0, 1)) +
+  theme_y +
+  theme (axis.text.x = element_blank ())
+
+####################
+#### Flow PLOT #####
+####################
+
+# Extract p-value of s(month)
+p_value_m <- summary(flow_temp_model)$s.table["s(month)", "p-value"]
+p_text_m <- ifelse(p_value_m < 0.001, "p < 0.001", 
+                     paste0("p = ", format(round(p_value_m, 3), 
+                                           nsmall = 3)))
+
+# Extract p-value of s(year)
+p_value_y <- summary(flow_temp_model)$s.table["s(year)", "p-value"]
+p_text_y <- ifelse(p_value_y < 0.001, "p < 0.001", 
+                     paste0("p = ", format(round(p_value_y, 3), 
+                                           nsmall = 3)))
+
+# Plot 1: Partial effect of month
+plot1_flow_temp <- draw(flow_temp_model, 
+                       select = 1, 
+                       residuals = T)
+
+# Change colours 
+plot1_flow_temp$layers[[1]]$aes_params$colour <- colour_point
+plot1_flow_temp$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Plot 1: Partial effect of month
+plot1_flow_temp <- plot1_flow_temp +
+  geom_line(linewidth = 1.3) +
+  annotate ("text", 
+            x = 0.5, 
+            y = -0.7,   
+            label = p_text_m, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  ylim (-1,2) +
+  scale_x_continuous(breaks = 1:12,
+                     labels = levels(data$month_abb)) +
+  theme_m +
+  theme (axis.text.x = element_text (angle = 90, 
+                                     vjust = 0.5, 
+                                     size  = 18))
+
+# Plot 2: Partial effect of year
+plot2_flow_temp <- draw(flow_temp_model, 
+                       select = 2, 
+                       residuals = T)
+
+# Change colours 
+plot2_flow_temp$layers[[1]]$aes_params$colour <- colour_point
+plot2_flow_temp$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Plot 1: Partial effect of month
+plot2_flow_temp <- plot2_flow_temp +
+  geom_line(linewidth = 1.3) +
+  annotate ("text", 
+            x = 2000.5, 
+            y = -0.7,   
+            label = p_text_y, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(y = "Flow") +
+  ylim (-1,2) +
+  theme_y +
+  theme (axis.text.x = element_text (angle = 90, 
+                                     vjust = 0.5, 
+                                     size  = 16))
+
+# Combine plots
+Figure_3 <- plot_grid(
+  plot2_CPUE_temp, plot1_CPUE_temp, 
+  plot2_temp_temp, plot1_temp_temp, 
+  plot2_PP_temp,   plot1_PP_temp, 
+  plot2_flow_temp, plot1_flow_temp, 
+  labels = c (
+    "a", "b", 
+    "c", "d", 
+    "e", "f", 
+    "g", "h"
+    ), 
+  label_x = c (
+    0.08, 0.06, 
+    0.08, 0.06, 
+    0.08, 0.06, 
+    0.08, 0.06
+    ), 
+  label_y = c (
+    0.98, 0.98,
+    0.98, 0.98,
+    0.98, 0.98,
+    0.98, 0.98
+    ),
+  rel_heights = c (1, 1, 1, 1.2), 
+  rel_widths = c (2,1),
+  label_size = 18, 
+  label_fontface = "bold",
+  ncol = 2, 
+  nrow = 4
+  )
+Figure_3
+```
+**Fig. 3.** Partial effects of smooth functions for temporal Generalized Additive Models (GAMs). The figure displays partial effects for models of CPUE (rows a–c), Sea Bottom Temperature (Temp) (rows d–f), Particulate Primary Production (PP) (rows g–i),  and Flow (rows j–l). The left column (a, d, g, j) shows the partial effect of the monthly smooth function; the middle column (b, e, h, k) shows the partial effect of the long-term (Year) smooth function; and the right column (c, f, i, l) displays the tensor product interaction (heatmap) between Month and Year. In the heatmaps, orange to reddish colors indicate a negative partial effect, and yellow to white colors indicate a positive partial effect. P-values for each smooth term in their respective temporal models are displayed in the upper right corner of each plot.
+\ 
+
+```{r, echo = F, fig.align ='center', fig.height = 3, fig.width = 11.5, warning = F}
+###################
+#### Figure 4 #####
+###################
+
+################################################
+#### CPUE Additive Multivariate Model PLOT #####
+################################################
+
+## Extract p-value
+# Trend
+p_value_m <- summary(CPUE1)$s.table["s(month_count)", "p-value"]
+p_text_m <- ifelse(p_value_m < 0.001, "p < 0.001", 
+                   paste0("p = ", format(round(p_value_m, 3), 
+                                          nsmall = 3)))
+
+# Temperature
+p_value_t <- summary(CPUE1)$s.table["s(temp)", "p-value"]
+p_text_t <- ifelse(p_value_t < 0.001, "p < 0.001", 
+                   paste0("p = ", format(round(p_value_t, 3), 
+                                         nsmall = 3)))
+
+# Primary productivity
+p_value_p <- summary(CPUE1)$s.table["s(PP)", "p-value"]
+p_text_p <- ifelse(p_value_p < 0.001, "p < 0.001", 
+                   paste0("p = ", format(round(p_value_p, 3), 
+                                         nsmall = 3)))
+
+# River flow
+p_value_f <- summary(CPUE1)$s.table["s(flow)", "p-value"]
+p_text_f <- ifelse(p_value_f < 0.001, "p < 0.001", 
+                   paste0("p = ", format(round(p_value_f, 3), 
+                                         nsmall = 3)))
+
+## Plot 1: Partial effect of month count (trend)
+# Create base plot
+p1_CPUE1 <- draw(CPUE1, 
+           select = 1, 
+           residuals = T)
+
+# Change colours 
+p1_CPUE1$layers[[1]]$aes_params$colour <- colour_point
+p1_CPUE1$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Final plot
+plot1_CPUE1 <- p1_CPUE1 +
+  geom_line(linewidth = 1.3, 
+            color = colour_line) +
+  annotate ("text", 
+            x = 10, 
+            y = -2.7,   
+            label = p_text_m, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(y = "Partial effect of s()",
+       x = "Trend (months)") +
+  ylim (-3,1) +
+  theme_model +
+  theme (axis.text.y = element_text(),
+         axis.title.y = element_text(angle = 90))
+
+## Plot 2: Partial effect of Temperature
+# Create base plot
+p2_CPUE1 <- draw(CPUE1, 
+           select = 2, 
+           residuals = T)
+
+# Change colours 
+p2_CPUE1$layers[[1]]$aes_params$colour <- colour_point
+p2_CPUE1$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Final plot
+plot2_CPUE1 <- p2_CPUE1 +
+  geom_line(linewidth = 1.3,
+            color = colour_line) +
+  annotate ("text", 
+            x = 23.2, 
+            y = -2.7,   
+            label = p_text_t, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs (x = "Temp (°C)") +
+  ylim (-3,1) +
+  theme_model
+
+## Plot 3: Partial effect of PP
+# Create base plot
+p3_CPUE1 <- draw(CPUE1, 
+           select = 3, 
+           residuals = T)
+
+# Change colours 
+p3_CPUE1$layers[[1]]$aes_params$colour <- colour_point
+p3_CPUE1$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Final plot
+plot3_CPUE1 <- p3_CPUE1 +
+  geom_line(linewidth = 1.3,
+            color = colour_line) +
+  annotate ("text", 
+            x = 480, 
+            y = -2.7,   
+            label = p_text_p, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs (x = "PP (mg/m²day)") +
+  ylim (-3,1) +
+  theme_model
+
+## Plot 4: Partial effect of flow
+# Create base plot
+p4_CPUE1 <- draw(CPUE1, 
+           select = 4, 
+           residuals = T)
+
+# Change colours 
+p4_CPUE1$layers[[1]]$aes_params$colour <- colour_point
+p4_CPUE1$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Final plot
+plot4_CPUE1 <- p4_CPUE1 +
+  geom_line(linewidth = 1.3,
+            color = colour_line) +
+  annotate ("text", 
+            x = 2, 
+            y = -2.7,   
+            label = p_text_f, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(x = "Flow (m³/s)") +
+  ylim (-3,1) +
+  theme_model
+
+# Combine plots
+Figure_4 <- plot_grid(
+  plot1_CPUE1, plot2_CPUE1, plot3_CPUE1, plot4_CPUE1,
+  labels = c (
+    "a", "b", "c", "d" 
+    ), 
+  label_x = c (
+    0.19, 0.05, 0.05, 0.04
+    ), 
+  label_y = c (
+    0.99, 0.99, 0.99, 0.99
+    ),
+  rel_widths = c (1,0.9,0.9,0.9),
+  label_size = 18, 
+  label_fontface = "bold",
+  ncol = 4, 
+  nrow = 1, 
+  height = 20, 
+  width = 23, 
+  align = "hv"
+)
+Figure_4
+```
+**Fig. 4.** Partial effects of smooth functions for CPUE Additive Multivariate Model (a, b, c, d) as a function of long term trend (Trend - a), sea bottom temperature (Temp - b), primary productivity (PP - c) and river flow (Flow - d). P-values for each smooth term are displayed in the bottom left corner of each plot.
+\ 
+
+```{r, echo = F, fig.align ='center', fig.height = 3, fig.width = 11.5, warning = F}
+###################
+#### Figure 5 #####
+###################
+
+############################################################
+#### CPUE Seasonal Interaction Multivariate Model PLOT #####
+############################################################
+
+## Extract p-value
+# Trend
+p_value_m <- summary(CPUE2)$s.table["s(month_count)", "p-value"]
+p_text_m <- ifelse(p_value_m < 0.001, "p < 0.001", 
+                   paste0("p = ", format(round(p_value_m, 3), 
+                                         nsmall = 3)))
+# Temperature
+p_value_t <- summary(CPUE2)$s.table["te(temp,month)", "p-value"]
+p_text_t <- ifelse(p_value_t < 0.001, "p < 0.001", 
+                   paste0("p = ", format(round(p_value_t, 3), 
+                                         nsmall = 3)))
+
+# Primary productivity
+p_value_p <- summary(CPUE2)$s.table["te(PP,month)", "p-value"]
+p_text_p <- ifelse(p_value_p < 0.001, "p < 0.001", 
+                   paste0("p = ", format(round(p_value_p, 3), 
+                                         nsmall = 3)))
+
+# River flow
+p_value_f <- summary(CPUE2)$s.table["te(flow,month)", "p-value"]
+p_text_f <- ifelse(p_value_f < 0.001, "p < 0.001", 
+                   paste0("p = ", format(round(p_value_f, 3), 
+                                         nsmall = 3)))
+
+## Plot 1: Partial effect of month count
+# Create base plot
+p1_CPUE2 <- draw(CPUE2, 
+                select = 1, 
+                residuals = T) 
+
+# Change colours 
+p1_CPUE2$layers[[1]]$aes_params$colour <- colour_point
+p1_CPUE2$layers[[2]]$aes_params$fill <- colour_ribbon
+
+# Final plot
+plot1_CPUE2 <- p1_CPUE2 +
+  geom_line(linewidth = 1.3,
+            color = colour_line) +
+  annotate ("text", 
+            x = 10, 
+            y = -2.3,   
+            label = p_text_m, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(x = "Trend (months)",
+       y = "Partial effect of s()") +
+  theme_model +
+  theme (axis.text.y = element_text(),
+         axis.title.y = element_text(angle = 90))
+
+## Plot 2: Partial effect of full tensor product of Temp and Month
+# Create base plot
+p2_CPUE2 <- draw(CPUE2, 
+                select = 2, 
+                residuals = T) 
+
+# Change colours 
+p2_CPUE2$layers[[4]]$aes_params$colour <- colour_point
+p2_CPUE2$layers[[4]]$aes_params$alpha  <- 0.8
+p2_CPUE2$layers[[4]]$aes_params$size   <- 1.5
+
+# Final plot
+plot2_CPUE2 <- p2_CPUE2 +
+  scale_fill_gradientn(colours = c(colour_line, colour_point, colour_grid),
+                       na.value = NA) +
+  geom_contour(aes(z = .estimate), 
+               color = colour_grid, 
+               alpha = 1) +
+  geom_text_contour(aes(z = .estimate), 
+                    stroke = 0.15, 
+                    check_overlap = TRUE, 
+                    color = "black",
+                    size = 4) +
+   annotate ("text", 
+            x = 23.2, 
+            y = 1.5,   
+            label = p_text_t, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(x = "Temp (°C)",
+       y = "Months") +
+  scale_y_continuous(breaks = 1:12,
+                     labels = levels(data$month_abb)) +
+  theme_model +
+  theme (axis.text.y = element_text(),
+         axis.title.y = element_text(angle = 90))
+
+## Plot 3: Partial effect of full tensor product of PP and Month
+# Create base plot
+p3_CPUE2 <- draw(CPUE2, 
+                select = 3, 
+                residuals = T) 
+
+# Change colours 
+p3_CPUE2$layers[[4]]$aes_params$colour <- colour_point
+p3_CPUE2$layers[[4]]$aes_params$alpha  <- 0.8
+p3_CPUE2$layers[[4]]$aes_params$size   <- 1.5
+
+# Final plot
+plot3_CPUE2 <- p3_CPUE2 +
+  scale_fill_gradientn(colours = c(colour_line, colour_point, colour_grid),
+                       na.value = NA) +
+  geom_contour(aes(z = .estimate), 
+               color = colour_grid, 
+               alpha = 1) +
+  geom_text_contour(aes(z = .estimate), 
+                    stroke = 0.15, 
+                    check_overlap = TRUE, 
+                    color = "black",
+                    size = 4) +
+  annotate ("text", 
+            x = 440, 
+            y = 1.5,   
+            label = p_text_p, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(x = "PP (mg/m²day)") +
+  scale_y_continuous(breaks = 1:12,
+                     labels = levels(data$month_abb)) +
+  theme_model
+
+## Plot 4: Partial effect of full tensor product of flow and Month
+# Create base plot
+p4_CPUE2 <- draw(CPUE2, 
+                select = 4, 
+                residuals = T) 
+
+# Change colours 
+p4_CPUE2$layers[[4]]$aes_params$colour <- colour_point
+p4_CPUE2$layers[[4]]$aes_params$alpha  <- 0.8
+p4_CPUE2$layers[[4]]$aes_params$size   <- 1.5
+
+# Final plot
+plot4_CPUE2 <- p4_CPUE2 +
+  scale_fill_gradientn(colours = c(colour_line, colour_point, colour_grid),
+                       na.value = NA) +
+  geom_contour(aes(z = .estimate), 
+               color = colour_grid, 
+               alpha = 1) +
+  geom_text_contour(aes(z = .estimate), 
+                    stroke = 0.15, 
+                    check_overlap = TRUE, 
+                    color = "black",
+                    size = 4) +
+  annotate ("text", 
+            x = 0, 
+            y = 1.5,   
+            label = p_text_f, 
+            hjust = 0, 
+            vjust = 0.5, 
+            color = "black", 
+            size = 5) +
+  labs(x = "Flow (m³/s)") +
+  scale_y_continuous(breaks = 1:12,
+                     labels = levels(data$month_abb)) +
+  theme_model
+
+# Combine plots
+Figure_5 <- plot_grid(
+  plot1_CPUE2, plot2_CPUE2, plot3_CPUE2, plot4_CPUE2,
+  labels = c (
+    "a", "b", "c", "d"
+    ), 
+  label_x = c (
+    0.19, 0.23, 0.01, 0.01
+    ), 
+  label_y = c (
+    0.99, 0.99, 0.99, 0.99
+    ),
+  rel_widths = c (1,1,0.9,0.9),
+  label_size = 18, 
+  label_fontface = "bold",
+  nrow = 1,
+  ncol = 4,
+  height = 20, 
+  width = 23, 
+  align = "v"
+)
+Figure_5
+```
+**Fig. 5.** Partial effects of smooth functions for  CPUE Seasonal Interaction Multivariate Model (a, b, c, d) as a function of long term trend (Trend - a), sea bottom temperature (Temp - b), primary productivity (PP - c) and river flow (Flow - d). The partial effects of smooths of Seasonal Model displays the full tensor product interaction (color gradient and values) between Month and factor. In the heatmaps, darker colors indicate a negative partial effect, and lighter colors indicate a positive partial effect. P-values for each smooth term are displayed in the upper right corner of each plot.
+\ 
+
+```{r, include = F}
+################################
+#### Save Table and Figures ####
+################################
+
+
+# Save Table 1
+write.xlsx (Table_1, file = "Table_1.xlsx")
+
+# Save Figures
+ggsave (paste0 (dir, "/Figura_2.png"), Figure_2, height = 10, width = 11.5)
+ggsave (paste0 (dir, "/Figura_3.png"), Figure_3, height = 10, width = 11.5)
+ggsave (paste0 (dir, "/Figura_4.png"), Figure_4, height = 3, width = 11.5)
+ggsave (paste0 (dir, "/Figura_5.png"), Figure_5, height = 3, width = 11.5)
+```
+
