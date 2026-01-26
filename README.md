@@ -1,5 +1,5 @@
-# Rabelo et al.: The Influence of Vitória Eddy in the abundance of seabob shrimp
-
+# THE INFLUENCE OF VITORIA EDDY IN THE ABUNDANCE OF SEABOB SHRIMP *Xiphopenaeus* spp. (HELLER) IN THE BRAZILIAN EAST COAST
+Leandro Bonesi Rabelo, Júlio Neves de Araújo, Agnaldo Silva Martins
 ## Overview
 This repository contains the data and RMarkdown code for the manuscript: **"The influence of Vitória Eddy in the abundance of seabob shrimp *Xiphopenaeus* spp. (Heller) in the Brazilian east coast"**, submitted to *Regional Studies in Marine Science*. 
 
