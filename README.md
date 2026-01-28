@@ -1,7 +1,7 @@
 # THE INFLUENCE OF VITORIA EDDY IN THE ABUNDANCE OF SEABOB SHRIMP *Xiphopenaeus* spp. (HELLER) IN THE BRAZILIAN EAST COAST
 Leandro Bonesi Rabelo, Júlio Neves de Araújo, Agnaldo Silva Martins
 ## Overview
-This repository contains the data and RMarkdown code for the manuscript: **"The influence of Vitória Eddy in the abundance of seabob shrimp *Xiphopenaeus* spp. (Heller) in the Brazilian east coast"**, submitted to *Regional Studies in Marine Science*. 
+This repository contains the data and RMarkdown code for the manuscript: **"The influence of Vitória Eddy in the abundance of seabob shrimp *Xiphopenaeus* spp. (Heller) in the Brazilian east coast"**. 
 
 The study investigates how mesoscale oceanographic processes, specifically primary productivity and bottom temperature, drive the abundance of seabob shrimp near the Caravelas Estuary (Abrolhos Bank). We utilized a 19-year time series (2001–2020) of Catch Per Unit Effort (CPUE) data, originated from the Environmental Monitoring Program of the Caravelas Maritime Terminal, to build Generalized Additive Models (GAMs) that account for both environmental variability and historical changes in sampling effort.
 
